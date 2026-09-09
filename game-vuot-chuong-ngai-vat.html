@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Game Vượt Chướng Ngại Vật</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: Arial, sans-serif;
+    color: white;
+    overflow: hidden;
+    touch-action: none;
+  }
+  #gameContainer {
+    position: relative;
+    border: 3px solid #eee;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+  }
+  canvas {
+    display: block;
+    background: linear-gradient(#87CEEB, #E0F7FA);
+    width: 100%;
+    max-width: 800px;
+  }
+  #ui {
+    position: absolute;
+    top: 8px;
+    left: 10px;
+    font-size: 16px;
+    text-shadow: 1px 1px 2px black;
+    z-index: 10;
+  }
+  #controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 0 10px;
+  }
+  button {
+    width: 68px;
+    height: 68px;
+    font-size: 13px;
+    font-weight: bold;
+    border: none;
+    border-radius: 14px;
+    background: #4CAF50;
+    color: white;
+    cursor: pointer;
+    box-shadow: 0 4px 0 #2E7D32;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+  button:active {
+    transform: translateY(3px);
+    box-shadow: 0 1px 0 #2E7D32;
+  }
+  #btnLeft { background: #2196F3; box-shadow: 0 4px 0 #1565C0; }
+  #btnRight { background: #2196F3; box-shadow: 0 4px 0 #1565C0; }
+  #btnJump { background: #FF9800; box-shadow: 0 4px 0 #EF6C00; }
+  #btnSit { background: #9C27B0; box-shadow: 0 4px 0 #6A1B9A; }
+  #message {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 22px;
+    font-weight: bold;
+    text-align: center;
+    text-shadow: 2px 2px 4px black;
+    display: none;
+    z-index: 20;
+    background: rgba(0,0,0,0.8);
+    padding: 18px 28px;
+    border-radius: 14px;
+    white-space: pre-line;
+    line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+  <div id="gameContainer">
+    <canvas id="gameCanvas" width="800" height="450"></canvas>
+    <div id="ui">Level: <span id="levelNum">1</span> | Mạng: <span id="lives">3</span></div>
+    <div id="message"></div>
+  </div>
+
+  <div id="controls">
+    <button id="btnLeft">◀ Lùi</button>
+    <button id="btnRight">Tiến ▶</button>
+    <button id="btnJump">Nhảy</button>
+    <button id="btnSit">Ngồi</button>
+  </div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const levelNumEl = document.getElementById('levelNum');
+const livesEl = document.getElementById('lives');
+const messageEl = document.getElementById('message');
+
+const player = {
+  x: 50, y: 300, width: 28, height: 48,
+  normalHeight: 48, sitHeight: 28,
+  vx: 0, vy: 0, speed: 3.8, jumpPower: -11.5,
+  onGround: false, isSitting: false, color: '#FF6B6B'
+};
+
+let currentLevel = 0;
+let lives = 3;
+let gameOver = false;
+let levelComplete = false;
+let keys = { left: false, right: false, jump: false, sit: false };
+
+let bridgeJumpCount = 0;
+const MAX_BRIDGE_JUMP = 2;
+let isOnBridge = false;
+let bridgeBroken = false;
+
+const levels = [
+  {
+    spawn: {x: 40, y: 340},
+    platforms: [
+      {x:0, y:400, w:800, h:50},
+      {x:220, y:320, w:130, h:18},
+      {x:420, y:250, w:110, h:18},
+      {x:580, y:180, w:120, h:18}
+    ],
+    spikes: [{x:380, y:380, w:55, h:20}],
+    lava: [],
+    thinBridges: [],
+    gate: {x:730, y:130, w:40, h:50}
+  },
+  {
+    spawn: {x: 30, y: 340},
+    platforms: [
+      {x:0, y:400, w:160, h:50},
+      {x:240, y:400, w:140, h:50},
+      {x:460, y:400, w:340, h:50},
+      {x:140, y:300, w:90, h:16},
+      {x:340, y:220, w:100, h:16},
+      {x:540, y:150, w:100, h:16}
+    ],
+    spikes: [
+      {x:160, y:380, w:80, h:20},
+      {x:380, y:380, w:80, h:20}
+    ],
+    lava: [{x:240, y:392, w:140, h:18}],
+    thinBridges: [{x:230, y:300, w:55, h:7}],
+    gate: {x:720, y:100, w:40, h:50}
+  },
+  {
+    spawn: {x: 25, y: 340},
+    platforms: [
+      {x:0, y:400, w:110, h:50},
+      {x:180, y:400, w:90, h:50},
+      {x:340, y:400, w:100, h:50},
+      {x:520, y:400, w:280, h:50},
+      {x:90, y:310, w:75, h:14},
+      {x:230, y:240, w:70, h:14},
+      {x:390, y:175, w:85, h:14},
+      {x:570, y:120, w:110, h:14}
+    ],
+    spikes: [
+      {x:110, y:380, w:70, h:20},
+      {x:270, y:380, w:70, h:20},
+      {x:440, y:380, w:80, h:20}
+    ],
+    lava: [
+      {x:180, y:392, w:90, h:18},
+      {x:340, y:392, w:100, h:18}
+    ],
+    thinBridges: [
+      {x:165, y:310, w:50, h:6},
+      {x:305, y:240, w:50, h:6}
+    ],
+    gate: {x:720, y:70, w:40, h:50}
+  },
+  {
+    spawn: {x: 20, y: 340},
+    platforms: [
+      {x:0, y:400, w:85, h:50},
+      {x:150, y:400, w:55, h:50},
+      {x:280, y:400, w:60, h:50},
+      {x:420, y:400, w:55, h:50},
+      {x:560, y:400, w:240, h:50},
+      {x:70, y:300, w:50, h:12},
+      {x:190, y:230, w:45, h:12},
+      {x:320, y:170, w:50, h:12},
+      {x:460, y:110, w:55, h:12},
+      {x:600, y:55, w:90, h:12}
+    ],
+    spikes: [
+      {x:85, y:380, w:65, h:20},
+      {x:205, y:380, w:75, h:20},
+      {x:340, y:380, w:80, h:20},
+      {x:475, y:380, w:85, h:20}
+    ],
+    lava: [
+      {x:150, y:392, w:55, h:18},
+      {x:280, y:392, w:60, h:18},
+      {x:420, y:392, w:55, h:18}
+    ],
+    thinBridges: [
+      {x:120, y:300, w:40, h:5},
+      {x:240, y:230, w:40, h:5},
+      {x:380, y:170, w:40, h:5}
+    ],
+    gate: {x:720, y:5, w:40, h:50}
+  }
+];
+
+function bindButton(id, key) {
+  const btn = document.getElementById(id);
+  btn.addEventListener('touchstart', e => { e.preventDefault(); keys[key] = true; }, {passive: false});
+  btn.addEventListener('touchend', e => { e.preventDefault(); keys[key] = false; }, {passive: false});
+  btn.addEventListener('mousedown', () => keys[key] = true);
+  btn.addEventListener('mouseup', () => keys[key] = false);
+  btn.addEventListener('mouseleave', () => keys[key] = false);
+}
+bindButton('btnLeft', 'left');
+bindButton('btnRight', 'right');
+bindButton('btnJump', 'jump');
+bindButton('btnSit', 'sit');
+
+function rectCollision(r1, r2) {
+  return r1.x < r2.x + r2.w && r1.x + r1.width > r2.x &&
+         r1.y < r2.y + r2.h && r1.y + r1.height > r2.y;
+}
+
+function resetPlayer() {
+  const spawn = levels[currentLevel].spawn;
+  player.x = spawn.x;
+  player.y = spawn.y;
+  player.vx = 0;
+  player.vy = 0;
+  player.isSitting = false;
+  player.height = player.normalHeight;
+  player.onGround = false;
+}
+
+function loadLevel(index) {
+  currentLevel = index;
+  levelNumEl.textContent = index + 1;
+  resetPlayer();
+  gameOver = false;
+  levelComplete = false;
+  bridgeJumpCount = 0;
+  bridgeBroken = false;
+  isOnBridge = false;
+  messageEl.style.display = 'none';
+}
+
+function restartGame() {
+  lives = 3;
+  livesEl.textContent = lives;
+  loadLevel(0);
+}
+
+function showMessage(text, color = 'white') {
+  messageEl.textContent = text;
+  messageEl.style.color = color;
+  messageEl.style.display = 'block';
+}
+
+function update() {
+  if (gameOver || levelComplete) return;
+  const level = levels[currentLevel];
+
+  if (keys.sit && !player.isSitting) {
+    player.height = player.sitHeight;
+    player.isSitting = true;
+  } else if (!keys.sit && player.isSitting) {
+    player.height = player.normalHeight;
+    player.isSitting = false;
+    for (let p of level.platforms) {
+      if (rectCollision(player, p)) {
+        player.height = player.sitHeight;
+        player.isSitting = true;
+        break;
+      }
+    }
+  }
+
+  player.vx = 0;
+  if (keys.left)  player.vx = -player.speed;
+  if (keys.right) player.vx =  player.speed;
+
+  if (keys.jump && player.onGround) {
+    if (currentLevel === 1 && isOnBridge && !bridgeBroken) {
+      bridgeJumpCount++;
+      if (bridgeJumpCount >= MAX_BRIDGE_JUMP) {
+        bridgeBroken = true;
+      }
+    }
+    player.vy = player.jumpPower;
+    player.onGround = false;
+  }
+
+  player.vy += 0.55;
+  if (player.vy > 14) player.vy = 14;
+
+  player.x += player.vx;
+  if (player.x < 0) player.x = 0;
+  if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
+
+  for (let p of level.platforms) {
+    if (rectCollision(player, p)) {
+      if (player.vx > 0) player.x = p.x - player.width;
+      else if (player.vx < 0) player.x = p.x + p.w;
+    }
+  }
+
+  player.y += player.vy;
+  player.onGround = false;
+  isOnBridge = false;
+
+  for (let p of level.platforms) {
+    if (rectCollision(player, p)) {
+      if (player.vy > 0) {
+        player.y = p.y - player.height;
+        player.vy = 0;
+        player.onGround = true;
+      } else if (player.vy < 0) {
+        player.y = p.y + p.h;
+        player.vy = 0;
+      }
+    }
+  }
+
+  for (let b of level.thinBridges) {
+    if (currentLevel === 1 && bridgeBroken) continue;
+
+    if (rectCollision(player, b)) {
+      if (player.vy > 0 && player.y + player.height - player.vy <= b.y + 8) {
+        player.y = b.y - player.height;
+        player.vy = 0;
+        player.onGround = true;
+        isOnBridge = true;
+      }
+    }
+  }
+
+  for (let s of level.spikes) {
+    if (rectCollision(player, s)) { die(); return; }
+  }
+  for (let l of level.lava) {
+    if (rectCollision(player, l)) { die(); return; }
+  }
+  if (player.y > canvas.height + 30) { die(); return; }
+
+  if (rectCollision(player, level.gate)) {
+    levelComplete = true;
+    if (currentLevel < levels.length - 1) {
+      showMessage('QUA MÀN!\nChuẩn bị màn tiếp theo...', '#4CAF50');
+      setTimeout(() => loadLevel(currentLevel + 1), 1400);
+    } else {
+      showMessage('CHIẾN THẮNG!\nBạn đã vượt qua tất cả!', '#FFD700');
+      gameOver = true;
+    }
+  }
+}
+
+function die() {
+  lives--;
+  livesEl.textContent = lives;
+
+  bridgeJumpCount = 0;
+  bridgeBroken = false;
+  isOnBridge = false;
+
+  if (lives <= 0) {
+    gameOver = true;
+    showMessage('THUA RỒI!\n\nChạm vào màn hình để chơi lại', '#FF5252');
+  } else {
+    gameOver = true;
+    showMessage('Bị thương!\nCòn ' + lives + ' mạng\n\nChạm vào màn hình để tiếp tục', '#FF9800');
+  }
+}
+
+function tryRespawnOrRestart() {
+  if (!gameOver) return;
+
+  if (lives > 0 && !levelComplete) {
+    gameOver = false;
+    messageEl.style.display = 'none';
+    resetPlayer();
+  } else if (lives <= 0) {
+    restartGame();
+  }
+}
+
+canvas.addEventListener('click', tryRespawnOrRestart);
+canvas.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  tryRespawnOrRestart();
+}, {passive: false});
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const level = levels[currentLevel];
+
+  for (let p of level.platforms) {
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.fillStyle = '#4CAF50';
+    ctx.fillRect(p.x, p.y, p.w, 5);
+  }
+
+  for (let b of level.thinBridges) {
+    if (currentLevel === 1 && bridgeBroken) continue;
+
+    if (currentLevel === 1) {
+      if (bridgeJumpCount === 0) ctx.fillStyle = '#CD853F';
+      else if (bridgeJumpCount === 1) ctx.fillStyle = '#D2691E';
+      else ctx.fillStyle = '#A0522D';
+    } else {
+      ctx.fillStyle = '#CD853F';
+    }
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+  }
+
+  ctx.fillStyle = '#444';
+  for (let s of level.spikes) {
+    const count = Math.floor(s.w / 11);
+    for (let i = 0; i < count; i++) {
+      ctx.beginPath();
+      ctx.moveTo(s.x + i * 11, s.y + s.h);
+      ctx.lineTo(s.x + i * 11 + 5.5, s.y);
+      ctx.lineTo(s.x + i * 11 + 11, s.y + s.h);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  for (let l of level.lava) {
+    ctx.fillStyle = '#FF4500';
+    ctx.fillRect(l.x, l.y, l.w, l.h);
+    ctx.fillStyle = '#FF6347';
+    ctx.fillRect(l.x, l.y, l.w, 5);
+  }
+
+  const g = level.gate;
+  ctx.fillStyle = '#FFD700';
+  ctx.fillRect(g.x, g.y, g.w, g.h);
+  ctx.fillStyle = '#FF8F00';
+  ctx.fillRect(g.x + 6, g.y + 10, g.w - 12, g.h - 20);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 13px Arial';
+  ctx.fillText('WIN', g.x + 7, g.y + 38);
+
+  ctx.fillStyle = player.color;
+  ctx.fillRect(player.x, player.y + 14, player.width, player.height - 14);
+
+  ctx.beginPath();
+  ctx.arc(player.x + player.width / 2, player.y + 12, 11, 0, Math.PI * 2);
+  ctx.fillStyle = '#FFCC80';
+  ctx.fill();
+
+  ctx.fillStyle = '#222';
+  ctx.fillRect(player.x + 7, player.y + 8, 4, 4);
+  ctx.fillRect(player.x + 16, player.y + 8, 4, 4);
+
+  ctx.fillStyle = '#333';
+  if (!player.isSitting) {
+    ctx.fillRect(player.x + 4, player.y + player.height - 6, 7, 7);
+    ctx.fillRect(player.x + 16, player.y + player.height - 6, 7, 7);
+  } else {
+    ctx.fillRect(player.x + 4, player.y + player.height - 4, 8, 5);
+    ctx.fillRect(player.x + 15, player.y + player.height - 4, 8, 5);
+  }
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+loadLevel(0);
+gameLoop();
+</script>
+</body>
+</html>
